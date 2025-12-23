@@ -3,8 +3,7 @@
 > **📖 Quick Links:**
 > - [Real Testing Flow](REAL_TESTING_FLOW.md) - Step-by-step testing guide
 > - [How to Get Shop ID](HOW_TO_GET_SHOP_ID.md) - Find your TikTok shop ID
-> - [Encryption Setup](ENCRYPTION_SETUP.md) - Set up X-Bogus and X-Gnarly
-> - [Quick Start](QUICK_START.md) - Quick reference commands
+> - [Install Ruby on Windows](INSTALL_RUBY.md) - Ruby/Bundler setup
 
 ## Part A - Discovered Endpoint
 
@@ -111,34 +110,19 @@ bundle install
    - No migrations needed - Mongoid creates collections automatically
    - Update `config/mongoid.yml` if using a remote MongoDB instance
 
-4. **Add encryption files:**
+4. **Encryption files:**
    
-   **Important:** The repository doesn't have ready-to-use `.mjs` files. You need to adapt the encryption logic.
-   
-   **Steps:**
-   
-   1. **Clone the encryption repository:**
-      ```bash
-      git clone https://github.com/justscrapeme/tiktok-web-reverse-engineering.git
-      ```
-   
-   2. **Examine the files:**
-      - Look at `encode.js` and `decode.js` in the cloned repository
-      - Check the `README.md` for usage examples
-   
-   3. **Adapt the wrapper files:**
-      - I've created placeholder files at `app/javascript/encryption/xbogus.mjs` and `app/javascript/encryption/xgnarly.mjs`
-      - You need to fill these with the actual implementation from the repository's `encode.js`
-      - The functions must match these signatures:
-        - `signBogus(queryString, bodyString, userAgent, timestamp)` → returns X-Bogus string
-        - `signGnarly(queryString, bodyString, userAgent, version, envcode)` → returns X-Gnarly string
-   
-   **See `ENCRYPTION_SETUP.md` for detailed step-by-step instructions.**
+   - `app/javascript/encryption/xgnarly.mjs` contains a working implementation adapted from `encode.js` in the `tiktok-web-reverse-engineering` repo.
+   - `app/javascript/encryption/xbogus.mjs` currently uses a **placeholder** implementation that generates a hash-based value.
+   - In production you may want to replace `xbogus.mjs` with a proper X‑Bogus implementation; the function signature is:
+     - `signBogus(queryString, bodyString, userAgent, timestamp)` → returns X‑Bogus string
+   - X‑Gnarly signature:
+     - `signGnarly(queryString, bodyString, userAgent, version, envcode)` → returns X‑Gnarly string
 
-5. **Create a TikTokShop record:**
+5. **Create a TikTokShop record (once):**
 ```ruby
-# In Rails console
-TikTokShop.create!(
+# In Rails console (example)
+shop = TikTokShop.create!(
   name: "My TikTok Shop",
   cookie: "_m4b_theme_=new; i18next=en; ...", # Your full cookie string
   oec_seller_id: "7496020242935155064",
@@ -147,20 +131,24 @@ TikTokShop.create!(
   timezone_offset: -28800,
   region: "US"
 )
+
+shop.id # <- Mongoid ObjectId, use this in all examples below
 ```
 
-### Running the Scraper
+### Running the Scraper (Rails console)
 
 ```ruby
 # In Rails console
-TikTokShop::SyncProductAnalytics.call(
-  tik_tok_shop_id: 1,
-  start_date: Date.parse("2025-11-01"),
-  end_date: Date.parse("2025-11-30")
+shop = TikTokShop.first          # or find by name / oec_seller_id
+
+SyncProductAnalytics.call(
+  tik_tok_shop_id: shop.id,      # Mongoid ObjectId (NOT integer 1)
+  start_date: "2025-11-01",
+  end_date:   "2025-11-30"
 )
 ```
 
-This will:
+This service will:
 - Fetch products for each day in the date range
 - Handle pagination automatically
 - Upsert products and daily snapshots (idempotent - safe to re-run)
@@ -169,16 +157,18 @@ This will:
 
 Start the Rails server:
 ```bash
-rails server
+bundle exec rails server
 ```
 
 Then make requests:
 ```bash
+# Replace SHOP_ID with the Mongoid ObjectId from your TikTokShop record
+
 # Get all products in date range
-curl "http://localhost:3000/api/v1/tik_tok_shops/1/product_analytics?start_date=2025-11-01&end_date=2025-11-30"
+curl "http://localhost:3000/api/v1/tik_tok_shops/SHOP_ID/product_analytics?start_date=2025-11-01&end_date=2025-11-30"
 
 # Filter by minimum GMV (in dollars)
-curl "http://localhost:3000/api/v1/tik_tok_shops/1/product_analytics?start_date=2025-11-01&end_date=2025-11-30&min_gmv=1000"
+curl "http://localhost:3000/api/v1/tik_tok_shops/SHOP_ID/product_analytics?start_date=2025-11-01&end_date=2025-11-30&min_gmv=1000"
 ```
 
 **Response format:**
