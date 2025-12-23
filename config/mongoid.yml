@@ -1,0 +1,34 @@
+development:
+  clients:
+    default:
+      database: tiktok_shop_scraper_development
+      hosts:
+        - localhost:27017
+      options:
+        # The following options are available and shown with their default values
+        # max_pool_size: 5
+        # min_pool_size: 1
+        # wait_queue_timeout: 1
+
+test:
+  clients:
+    default:
+      database: tiktok_shop_scraper_test
+      hosts:
+        - localhost:27017
+      options:
+        read:
+          mode: :primary
+        max_pool_size: 1
+
+production:
+  clients:
+    default:
+      database: tiktok_shop_scraper_production
+      hosts:
+        - <%= ENV['MONGODB_HOST'] || 'localhost:27017' %>
+      options:
+        username: <%= ENV['MONGODB_USERNAME'] %>
+        password: <%= ENV['MONGODB_PASSWORD'] %>
+        auth_source: <%= ENV['MONGODB_AUTH_SOURCE'] || 'admin' %>
+
