@@ -91,7 +91,7 @@ export async function getProductsRaw({
   startDate,
   endDate,
   pageNo = 0,
-  pageSize = 10,
+  pageSize = 50,
 }) {
   const payload = {
     request: {
@@ -100,7 +100,7 @@ export async function getProductsRaw({
         end: endDate,
         timezone_offset: timezoneOffset,
       },
-      ccr_available_date: new Date().toISOString().split("T")[0],
+      ccr_available_date: startDate,
       search: {
         voc_statuses: [],
         gmv_ranges: [],
@@ -153,14 +153,14 @@ export async function getProductsRaw({
   try {
     const response = await axios.post(signedUrl, payload, {
       headers: {
-        "accept": "*/*",
+        accept: "*/*",
         "accept-language": "en-US,en;q=0.9",
         "cache-control": "no-cache",
         "content-type": "application/json",
-        "origin": baseUrl,
-        "pragma": "no-cache",
-        "priority": "u=1, i",
-        "referer": referer,
+        origin: baseUrl,
+        pragma: "no-cache",
+        priority: "u=1, i",
+        referer: referer,
         "sec-ch-ua": config.browser.secUa,
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"macOS"',
@@ -181,17 +181,45 @@ export async function getProductsRaw({
       response_status: error?.response?.status,
       response_data: error?.response?.data,
       request_url: error?.config?.url,
-      request_method: error?.config?.method
+      request_method: error?.config?.method,
     };
-    
-    console.error("Request error details:", JSON.stringify(errorDetails, null, 2));
-    
+
+    console.error(
+      "Request error details:",
+      JSON.stringify(errorDetails, null, 2)
+    );
+
     // Return the error response data if available, otherwise return our error details
     if (error?.response?.data) {
       return error.response.data;
     }
-    
+
     return errorDetails;
   }
+}
+
+export async function getAllProducts(params) {
+  let page = 0;
+  let allItems = [];
+  let hasMore = true;
+
+  while (hasMore) {
+    console.log(`Fetching page ${page}...`);
+
+    const response = await getProductsRaw({
+      ...params,
+      pageNo: page,
+    });
+
+    const items = response?.data?.items || [];
+    allItems.push(...items);
+
+    const pagination = response?.data?.list_control?.next_pagination;
+
+    hasMore = pagination?.has_more === true;
+    page = pagination?.next_page;
+  }
+
+  return allItems;
 }
 

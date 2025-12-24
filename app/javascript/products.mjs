@@ -10,6 +10,9 @@ process.stdin.on("data", (chunk) => {
 process.stdin.on("end", async () => {
   try {
     const params = JSON.parse(inputData);
+    let page = 0;
+    let hasMore = true;
+    const allItems = [];
 
     // Call the function with the provided parameters
     const result = await getProductsRaw({
@@ -23,9 +26,16 @@ process.stdin.on("end", async () => {
       pageNo: params.pageNo || 0,
       pageSize: params.pageSize || 10,
     });
+    const items = result?.data?.items || [];
+    allItems.push(...items);
 
-    // Output the result as JSON
-    console.log(JSON.stringify(result));
+    const pagination = result?.data?.list_control?.next_pagination;
+    hasMore = pagination?.has_more === true;
+    page = pagination?.next_page ?? page + 1;
+
+    // console.log(JSON.stringify({ result }));
+
+    process.stdout.write(JSON.stringify(result));
   } catch (error) {
     console.error(
       JSON.stringify({
@@ -36,5 +46,5 @@ process.stdin.on("end", async () => {
     );
     process.exit(1);
   }
+  // process.exit(0);
 });
-

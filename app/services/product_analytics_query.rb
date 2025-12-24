@@ -16,7 +16,7 @@ class ProductAnalyticsQuery
       # Match snapshots in date range for this shop
       {
         '$match' => {
-          'tik_tok_shop_id' => @tik_tok_shop.id,
+          'tik_tok_shop_id' => BSON::ObjectId(@tik_tok_shop.id.to_s),
           'snapshot_date' => { '$gte' => @start_date, '$lte' => @end_date }
         }
       },

@@ -1,3 +1,6 @@
+require 'bigdecimal'
+require 'bigdecimal/util'
+
 class SyncProductAnalytics
   class Error < StandardError; end
 
@@ -31,9 +34,10 @@ class SyncProductAnalytics
 
     while has_more
       response = fetch_page(date, page, page_size)
-      
-      unless response && response['status_code'] == 0
-        @errors << "Failed to fetch page #{page} for date #{date}: #{response&.dig('status_msg')}"
+      Rails.logger.info("RAW RESPONSE: #{response.inspect}")
+
+      unless response &&( response['code'] == 0 || response.key?('items'))
+        @errors << "Failed to fetch page #{page} for date #{date}: #{response&.dig('message')}"
         break
       end
 
@@ -49,10 +53,9 @@ class SyncProductAnalytics
       end
 
       # Check if there are more pages
-      pagination = response.dig('data', 'list_control', 'pagination') || {}
-      total_pages = pagination['total_page'] || 1
-      has_more = page < total_pages - 1
-      page += 1
+      pagination = response.dig('data', 'next_pagination') || {}
+      has_more = pagination['has_more']
+      page = pagination['next_page'] || page + 1
 
       # Safety check to prevent infinite loops
       break if page > 1000
@@ -77,13 +80,13 @@ class SyncProductAnalytics
   end
 
   def extract_products(response)
-    response.dig('data', 'product_list') || []
+    response.dig('data', 'items') || []
   end
 
   def upsert_product_and_snapshot(product_data, snapshot_date)
-    external_id = product_data['product_id'] || product_data['id']
-    return unless external_id
-
+    meta  = product_data['meta']
+    stats = product_data['stats']
+    external_id = meta['product_id']
     # Upsert product
     product = TikTokShopProduct.find_or_initialize_by(
       tik_tok_shop_id: @tik_tok_shop.id,
@@ -91,34 +94,40 @@ class SyncProductAnalytics
     )
 
     product.assign_attributes(
-      title: product_data['title'] || product_data['product_name'],
-      image_url: product_data['image_url'] || product_data['image'] || product_data['cover'],
-      status: product_data['status'] || product_data['product_status'],
-      stock: product_data['stock'] || product_data['stock_quantity'],
-      raw_data: product_data.to_json
+      title: meta['product_name'],
+      image_url: meta['product_image'],
+      status: map_status(meta['product_status']),
+      stock: meta['inventory_cnt'],
+      raw_data: meta.to_json
     )
 
-    product.save!
+    # product.save!
 
     # Upsert snapshot
     snapshot = TikTokShopProductSnapshot.find_or_initialize_by(
-      tik_tok_shop_product_id: product.id,
+      tik_tok_shop_product: product,
       snapshot_date: snapshot_date
     )
 
-    # Extract metrics - adjust field names based on actual API response structure
-    gmv = extract_decimal(product_data, ['gmv', 'total_gmv', 'gmv_amount'])
-    items_sold = extract_integer(product_data, ['items_sold', 'quantity_sold', 'sold_quantity'])
-    orders_count = extract_integer(product_data, ['orders_count', 'order_count', 'orders'])
-
     snapshot.assign_attributes(
       tik_tok_shop_id: @tik_tok_shop.id,
-      gmv: gmv,
-      items_sold: items_sold,
-      orders_count: orders_count,
-      raw_data: product_data.to_json
+      gmv: stats.dig('gmv', 'amount').to_d,
+      items_sold: stats['unit_sold_cnt'] || 0,
+      orders_count: stats['order_cnt'] || 0,
+      raw_data: stats.to_json
     )
 
+    # snapshot.save!
+
+    # begin
+    # Mongoid::Clients.default.start_session do |session| # only if using replica set or atlas 
+    #   session.with_transaction do
+    #     product.save!
+    #     snapshot.save!
+    #   end
+    # end
+    # If not using transactions, uncomment below
+    product.save!
     snapshot.save!
   rescue => e
     error_msg = "Error upserting product #{external_id} for date #{snapshot_date}: #{e.message}"
@@ -126,40 +135,49 @@ class SyncProductAnalytics
     Rails.logger.error("Error upserting product: #{e.message}\n#{e.backtrace.join("\n")}")
   end
 
-  def extract_decimal(data, possible_keys)
-    value = find_value(data, possible_keys)
-    return 0.0 unless value
-    
+
+  def map_status(value)
     case value
-    when Numeric
-      value.to_f
-    when String
-      value.gsub(/[^\d.-]/, '').to_f
-    else
-      0.0
+    when 1 then 'live'
+    when 0 then 'hidden'
+    else 'unknown'
     end
   end
 
-  def extract_integer(data, possible_keys)
-    value = find_value(data, possible_keys)
-    return 0 unless value
+  # def extract_decimal(data, possible_keys)
+  #   value = find_value(data, possible_keys)
+  #   return 0.0 unless value
     
-    case value
-    when Numeric
-      value.to_i
-    when String
-      value.gsub(/[^\d-]/, '').to_i
-    else
-      0
-    end
-  end
+  #   case value
+  #   when Numeric
+  #     value.to_f
+  #   when String
+  #     value.gsub(/[^\d.-]/, '').to_f
+  #   else
+  #     0.0
+  #   end
+  # end
 
-  def find_value(data, possible_keys)
-    possible_keys.each do |key|
-      return data[key] if data.key?(key)
-      return data[key.to_sym] if data.key?(key.to_sym)
-    end
-    nil
-  end
+  # def extract_integer(data, possible_keys)
+  #   value = find_value(data, possible_keys)
+  #   return 0 unless value
+    
+  #   case value
+  #   when Numeric
+  #     value.to_i
+  #   when String
+  #     value.gsub(/[^\d-]/, '').to_i
+  #   else
+  #     0
+  #   end
+  # end
+
+  # def find_value(data, possible_keys)
+  #   possible_keys.each do |key|
+  #     return data[key] if data.key?(key)
+  #     return data[key.to_sym] if data.key?(key.to_sym)
+  #   end
+  #   nil
+  # end
 end
 
